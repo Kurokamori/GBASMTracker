@@ -64,15 +64,14 @@ namespace GBZ80AsmMetrics
             _updateTimer.Tick += OnUpdateTimerTick;
 
             // Register menu commands
-            PluginBase.SetCommand(0, "Toggle Metrics Display", ToggleMetricsDisplay,
-                new ShortcutKey(true, false, true, Keys.M));
+            PluginBase.SetCommand(0, "Toggle Metrics Display", ToggleMetricsDisplay);
             PluginBase.SetCommand(1, "Toggle Start Point", ToggleStartPoint,
-                new ShortcutKey(true, false, true, Keys.S));
+                new ShortcutKey(true, false, true, Keys.M));
             PluginBase.SetCommand(2, "Clear All Start Points", ClearAllStartPoints);
             PluginBase.SetCommand(3, "Show Line Info", ShowLineInfo,
                 new ShortcutKey(true, false, true, Keys.I));
             PluginBase.SetCommand(4, "Toggle Metrics Panel", ToggleMetricsPanel,
-                new ShortcutKey(true, false, true, Keys.P));
+                new ShortcutKey(true, true, false, Keys.M));
             PluginBase.SetCommand(5, "Settings...", ShowSettings);
             PluginBase.SetCommand(6, "-", null); // Separator
             PluginBase.SetCommand(7, "About", ShowAbout);
@@ -301,10 +300,9 @@ namespace GBZ80AsmMetrics
                 "- Macro and PREDEF support\n" +
                 "- Full RGBDS syntax support\n\n" +
                 "Keyboard Shortcuts:\n" +
-                "Ctrl+Shift+M - Toggle metrics display\n" +
-                "Ctrl+Shift+S - Toggle start point\n" +
+                "Ctrl+Shift+M - Toggle start point\n" +
                 "Ctrl+Shift+I - Show line info\n" +
-                "Ctrl+Shift+P - Toggle metrics panel",
+                "Ctrl+Alt+M - Toggle metrics panel",
                 "About " + PluginName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
