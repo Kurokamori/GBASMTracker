@@ -1,0 +1,152 @@
+{
+  "name": "gb-asm-metrics",
+  "displayName": "GameBoy Assembly Metrics",
+  "description": "Display inline metrics (bytes, cycles, flags) for GameBoy assembly code",
+  "version": "0.1.0",
+  "publisher": "kurokamori",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:gbz80",
+    "workspaceContains:**/*.asm",
+    "workspaceContains:**/*.s",
+    "workspaceContains:**/*.inc"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "gbz80",
+        "aliases": [
+          "GameBoy Assembly",
+          "RGBDS",
+          "GBZ80"
+        ],
+        "extensions": [
+          ".asm",
+          ".s",
+          ".inc"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "gbAsmMetrics.toggleStartPoint",
+        "title": "Toggle Cumulative Start Point",
+        "category": "GB Assembly Metrics"
+      },
+      {
+        "command": "gbAsmMetrics.clearAllStartPoints",
+        "title": "Clear All Start Points",
+        "category": "GB Assembly Metrics"
+      },
+      {
+        "command": "gbAsmMetrics.toggleExpand",
+        "title": "Toggle Instruction Details",
+        "category": "GB Assembly Metrics"
+      },
+      {
+        "command": "gbAsmMetrics.toggleMetrics",
+        "title": "Toggle Metrics Display",
+        "category": "GB Assembly Metrics"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "gbAsmMetrics.toggleStartPoint",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m",
+        "when": "editorTextFocus && editorLangId == gbz80"
+      },
+      {
+        "command": "gbAsmMetrics.toggleExpand",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorTextFocus && editorLangId == gbz80"
+      }
+    ],
+    "configuration": {
+      "title": "GB Assembly Metrics",
+      "properties": {
+        "gbAsmMetrics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the metrics display"
+        },
+        "gbAsmMetrics.showByteCount": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show byte count for each instruction"
+        },
+        "gbAsmMetrics.showCycleCount": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show cycle count for each instruction"
+        },
+        "gbAsmMetrics.showCumulative": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show cumulative byte/cycle totals"
+        },
+        "gbAsmMetrics.assumeBranchTaken": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use branch-taken cycle count for conditional instructions"
+        },
+        "gbAsmMetrics.predefBytes": {
+          "type": "number",
+          "default": 8,
+          "description": "Byte count for predef/farcall instructions (typically 8: ld a,BANK + ld hl,addr + call)"
+        },
+        "gbAsmMetrics.predefCycles": {
+          "type": "number",
+          "default": 44,
+          "description": "Cycle count for predef/farcall instructions (typically 44: 8 + 12 + 24)"
+        },
+        "gbAsmMetrics.predefJumpBytes": {
+          "type": "number",
+          "default": 8,
+          "description": "Byte count for predef_jump instructions (typically 8: ld a,BANK + ld hl,addr + jp)"
+        },
+        "gbAsmMetrics.predefJumpCycles": {
+          "type": "number",
+          "default": 36,
+          "description": "Cycle count for predef_jump instructions (typically 36: 8 + 12 + 16)"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "gbAsmMetrics.toggleStartPoint",
+          "when": "editorLangId == gbz80",
+          "group": "gbasm@1"
+        },
+        {
+          "command": "gbAsmMetrics.toggleExpand",
+          "when": "editorLangId == gbz80",
+          "group": "gbasm@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0"
+  }
+}

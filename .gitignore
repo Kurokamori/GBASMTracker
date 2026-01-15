@@ -1,0 +1,11 @@
+out/
+node_modules/
+.vscode-test/
+obj/
+bin/
+*.vsix
+*.dll
+.*/
+!.git/
+!.github/
+.DS_Store
