@@ -24,9 +24,10 @@ namespace GBZ80AsmMetrics
         private static int _cmdClearStartPoints = 2;
         private static int _cmdShowLineInfo = 3;
         private static int _cmdTogglePanel = 4;
-        private static int _cmdSettings = 5;
-        private static int _cmdSeparator = 6;
-        private static int _cmdAbout = 7;
+        private static int _cmdRescanWorkspace = 5;
+        private static int _cmdSettings = 6;
+        private static int _cmdSeparator = 7;
+        private static int _cmdAbout = 8;
         #endregion
 
         #region Fields
@@ -40,6 +41,9 @@ namespace GBZ80AsmMetrics
         private static string _lastDocContent = "";
         private static int _startPointMarker = 20; // Marker number for start point
         private static System.Collections.Generic.Dictionary<int, LineInfo> _cachedLineInfo = new System.Collections.Generic.Dictionary<int, LineInfo>();
+        private static string _lastScannedFolder = "";
+        private static FileSystemWatcher _fileWatcher;
+        private static Timer _rescanTimer;
         #endregion
 
         #region Plugin Entry Points
@@ -72,9 +76,10 @@ namespace GBZ80AsmMetrics
                 new ShortcutKey(true, false, true, Keys.I));
             PluginBase.SetCommand(4, "Toggle Metrics Panel", ToggleMetricsPanel,
                 new ShortcutKey(true, true, false, Keys.M));
-            PluginBase.SetCommand(5, "Settings...", ShowSettings);
-            PluginBase.SetCommand(6, "-", null); // Separator
-            PluginBase.SetCommand(7, "About", ShowAbout);
+            PluginBase.SetCommand(5, "Rescan Workspace", RescanWorkspace);
+            PluginBase.SetCommand(6, "Settings...", ShowSettings);
+            PluginBase.SetCommand(7, "-", null); // Separator
+            PluginBase.SetCommand(8, "About", ShowAbout);
         }
 
         /// <summary>
@@ -92,6 +97,9 @@ namespace GBZ80AsmMetrics
         {
             _updateTimer?.Stop();
             _updateTimer?.Dispose();
+            _rescanTimer?.Stop();
+            _rescanTimer?.Dispose();
+            _fileWatcher?.Dispose();
             _metricsPanel?.Dispose();
         }
 
@@ -140,6 +148,12 @@ namespace GBZ80AsmMetrics
         {
             // Setup marker for start point
             SetupMarkers();
+
+            // Scan workspace for routine definitions
+            if (IsAssemblyFile())
+            {
+                ScanWorkspaceForRoutines();
+            }
 
             // Initial update
             if (_isMetricsEnabled && IsAssemblyFile())
@@ -286,8 +300,31 @@ namespace GBZ80AsmMetrics
             }
         }
 
+        private static void RescanWorkspace()
+        {
+            if (!IsAssemblyFile())
+            {
+                MessageBox.Show("Please open an assembly file (.asm, .s, .inc) first.",
+                    PluginName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Force rescan by clearing the last scanned folder
+            _lastScannedFolder = "";
+            ScanWorkspaceForRoutines();
+
+            int routineCount = _metricsEngine?.GetRoutineCount() ?? 0;
+            MessageBox.Show($"Workspace scanned!\n\nProject root: {_lastScannedFolder}\nDocumented routines found: {routineCount}",
+                PluginName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
         private static void ShowAbout()
         {
+            int routineCount = _metricsEngine?.GetRoutineCount() ?? 0;
+            string scanInfo = string.IsNullOrEmpty(_lastScannedFolder)
+                ? "No workspace scanned yet"
+                : $"Workspace: {_lastScannedFolder}\nDocumented routines found: {routineCount}";
+
             MessageBox.Show(
                 "GB Z80 Assembly Metrics Plugin\n" +
                 "Version 1.0.0\n\n" +
@@ -298,11 +335,13 @@ namespace GBZ80AsmMetrics
                 "- Cumulative counting from start point\n" +
                 "- Detailed instruction information\n" +
                 "- Macro and PREDEF support\n" +
-                "- Full RGBDS syntax support\n\n" +
+                "- Full RGBDS syntax support\n" +
+                "- Routine argument documentation\n\n" +
                 "Keyboard Shortcuts:\n" +
                 "Ctrl+Shift+M - Toggle start point\n" +
                 "Ctrl+Shift+I - Show line info\n" +
-                "Ctrl+Alt+M - Toggle metrics panel",
+                "Ctrl+Alt+M - Toggle metrics panel\n\n" +
+                "--- Scan Status ---\n" + scanInfo,
                 "About " + PluginName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -324,6 +363,206 @@ namespace GBZ80AsmMetrics
             }
 
             return configDir;
+        }
+
+        /// <summary>
+        /// Scan the project root (and subfolders) for assembly files to find routine definitions
+        /// </summary>
+        private static void ScanWorkspaceForRoutines()
+        {
+            string filePath = GetCurrentFilePath();
+            if (string.IsNullOrEmpty(filePath))
+                return;
+
+            string folder = Path.GetDirectoryName(filePath);
+            if (string.IsNullOrEmpty(folder))
+                return;
+
+            // Find the project root by looking for common markers
+            string projectRoot = FindProjectRoot(folder);
+
+            // Only rescan if project root changed
+            if (projectRoot == _lastScannedFolder)
+                return;
+
+            _lastScannedFolder = projectRoot;
+
+            // Clear existing registries and scan
+            _metricsEngine?.ClearAllRegistries();
+            int fileCount = ScanDirectoryForRoutines(projectRoot);
+
+            // Setup file watcher for this folder
+            SetupFileWatcher(projectRoot);
+
+            // Get routine count for debugging
+            int routineCount = _metricsEngine?.GetRoutineCount() ?? 0;
+            System.Diagnostics.Debug.WriteLine($"Scanned workspace: {projectRoot}, {fileCount} files, {routineCount} routines");
+        }
+
+        /// <summary>
+        /// Find the project root by looking for common markers (.git, Makefile, etc.)
+        /// </summary>
+        private static string FindProjectRoot(string startDir)
+        {
+            string current = startDir;
+            string lastValidDir = startDir;
+
+            while (!string.IsNullOrEmpty(current))
+            {
+                try
+                {
+                    // Check for common project root markers
+                    if (Directory.Exists(Path.Combine(current, ".git")) ||
+                        File.Exists(Path.Combine(current, "Makefile")) ||
+                        File.Exists(Path.Combine(current, "makefile")) ||
+                        File.Exists(Path.Combine(current, ".gitignore")) ||
+                        File.Exists(Path.Combine(current, "main.asm")) ||
+                        File.Exists(Path.Combine(current, "game.asm")) ||
+                        Directory.Exists(Path.Combine(current, "src")) ||
+                        Directory.Exists(Path.Combine(current, "engine")) ||
+                        Directory.Exists(Path.Combine(current, "home")) ||
+                        Directory.Exists(Path.Combine(current, "data")))
+                    {
+                        return current;
+                    }
+
+                    lastValidDir = current;
+                    string parent = Path.GetDirectoryName(current);
+
+                    // Stop if we've reached the root
+                    if (parent == current || string.IsNullOrEmpty(parent))
+                        break;
+
+                    current = parent;
+                }
+                catch
+                {
+                    break;
+                }
+            }
+
+            // If no project root found, use the starting directory
+            return lastValidDir;
+        }
+
+        /// <summary>
+        /// Recursively scan a directory for assembly files
+        /// </summary>
+        /// <returns>Number of files scanned</returns>
+        private static int ScanDirectoryForRoutines(string dirPath)
+        {
+            int count = 0;
+            try
+            {
+                var entries = Directory.GetFileSystemEntries(dirPath);
+
+                foreach (var entry in entries)
+                {
+                    try
+                    {
+                        if (Directory.Exists(entry))
+                        {
+                            // Skip common non-source directories
+                            string dirName = Path.GetFileName(entry);
+                            if (dirName != "node_modules" && dirName != ".git" &&
+                                dirName != "build" && dirName != "dist" &&
+                                dirName != "obj" && dirName != "bin")
+                            {
+                                count += ScanDirectoryForRoutines(entry);
+                            }
+                        }
+                        else if (File.Exists(entry))
+                        {
+                            string ext = Path.GetExtension(entry).ToLowerInvariant();
+                            if (ext == ".asm" || ext == ".s" || ext == ".inc")
+                            {
+                                string content = File.ReadAllText(entry);
+                                string[] lines = content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                                _metricsEngine?.ParseDocument(lines, Path.GetDirectoryName(entry), entry);
+                                count++;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Skip files/dirs that can't be accessed
+                    }
+                }
+            }
+            catch
+            {
+                // Skip directories that can't be read
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Setup file watcher to detect changes to assembly files
+        /// </summary>
+        private static void SetupFileWatcher(string folder)
+        {
+            // Dispose existing watcher
+            _fileWatcher?.Dispose();
+
+            try
+            {
+                _fileWatcher = new FileSystemWatcher(folder)
+                {
+                    Filter = "*.*",
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite
+                };
+
+                _fileWatcher.Changed += OnFileChanged;
+                _fileWatcher.Created += OnFileChanged;
+                _fileWatcher.Deleted += OnFileChanged;
+                _fileWatcher.Renamed += OnFileRenamed;
+
+                _fileWatcher.EnableRaisingEvents = true;
+
+                // Setup rescan timer
+                if (_rescanTimer == null)
+                {
+                    _rescanTimer = new Timer();
+                    _rescanTimer.Interval = 500; // 500ms debounce
+                    _rescanTimer.Tick += OnRescanTimerTick;
+                }
+            }
+            catch
+            {
+                // Unable to create watcher, continue without it
+            }
+        }
+
+        private static void OnFileChanged(object sender, FileSystemEventArgs e)
+        {
+            string ext = Path.GetExtension(e.FullPath).ToLowerInvariant();
+            if (ext == ".asm" || ext == ".s" || ext == ".inc")
+            {
+                // Debounce rescan
+                _rescanTimer?.Stop();
+                _rescanTimer?.Start();
+            }
+        }
+
+        private static void OnFileRenamed(object sender, RenamedEventArgs e)
+        {
+            string oldExt = Path.GetExtension(e.OldFullPath).ToLowerInvariant();
+            string newExt = Path.GetExtension(e.FullPath).ToLowerInvariant();
+            if (oldExt == ".asm" || oldExt == ".s" || oldExt == ".inc" ||
+                newExt == ".asm" || newExt == ".s" || newExt == ".inc")
+            {
+                // Debounce rescan
+                _rescanTimer?.Stop();
+                _rescanTimer?.Start();
+            }
+        }
+
+        private static void OnRescanTimerTick(object sender, EventArgs e)
+        {
+            _rescanTimer?.Stop();
+            _lastScannedFolder = ""; // Force rescan
+            ScanWorkspaceForRoutines();
         }
 
         private static IntPtr GetCurrentScintilla()
@@ -665,6 +904,12 @@ namespace GBZ80AsmMetrics
         {
             SetupMarkers();
             _lastDocContent = ""; // Force refresh
+
+            if (IsAssemblyFile())
+            {
+                // Scan workspace for routine definitions if we're in a new folder
+                ScanWorkspaceForRoutines();
+            }
 
             if (_isMetricsEnabled && IsAssemblyFile())
             {

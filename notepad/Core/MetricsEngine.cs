@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace GBZ80AsmMetrics.Core
 {
@@ -25,11 +26,27 @@ namespace GBZ80AsmMetrics.Core
         }
 
         /// <summary>
-        /// Parse a document for macro definitions
+        /// Parse a document for macro and routine definitions
         /// </summary>
-        public void ParseDocument(string[] lines, string baseDir)
+        public void ParseDocument(string[] lines, string baseDir, string filePath = null)
         {
-            _parser.ParseDocument(lines, baseDir);
+            _parser.ParseDocument(lines, baseDir, filePath);
+        }
+
+        /// <summary>
+        /// Clear all registries (call before scanning workspace)
+        /// </summary>
+        public void ClearAllRegistries()
+        {
+            _parser.ClearAll();
+        }
+
+        /// <summary>
+        /// Get the number of documented routines found
+        /// </summary>
+        public int GetRoutineCount()
+        {
+            return _parser.RoutineRegistry.GetAll().Count();
         }
 
         /// <summary>
@@ -71,6 +88,16 @@ namespace GBZ80AsmMetrics.Core
                     info.PredefTypeLabel = "PREDEF";
                 }
 
+                // Look up routine information for predef calls
+                if (parsed.Operands.Count > 0)
+                {
+                    var routine = _parser.RoutineRegistry.Get(parsed.Operands[0]);
+                    if (routine != null && (routine.Arguments.Count > 0 || routine.Description != null))
+                    {
+                        info.TargetRoutine = routine;
+                    }
+                }
+
                 return info;
             }
 
@@ -104,6 +131,39 @@ namespace GBZ80AsmMetrics.Core
                     info.Opcode = opcode;
                     info.IsCBPrefixed = _opcodeDb.IsCBPrefixedInstruction(parsed.Instruction);
                     info.OpcodeHex = _opcodeDb.GetOpcodeHex(opcode, info.IsCBPrefixed);
+
+                    // Check if this is a call/jump instruction that references a documented routine
+                    var callInstructions = new[] { "CALL", "JP", "JR", "RST" };
+                    if (callInstructions.Contains(parsed.Instruction.ToUpperInvariant()) && parsed.Operands.Count > 0)
+                    {
+                        // Get the target label (last operand for conditional calls)
+                        var targetLabel = parsed.Operands[parsed.Operands.Count - 1];
+                        var routine = _parser.RoutineRegistry.Get(targetLabel);
+                        if (routine != null && (routine.Arguments.Count > 0 || routine.Description != null))
+                        {
+                            info.TargetRoutine = routine;
+                        }
+                    }
+
+                    // Check for memory references in operands (e.g., [wCurPartySpecies])
+                    if (info.TargetRoutine == null)
+                    {
+                        foreach (var operand in parsed.Operands)
+                        {
+                            // Match memory references like [label] or [label + offset]
+                            var memMatch = Regex.Match(operand, @"\[([a-zA-Z_]\w*)");
+                            if (memMatch.Success)
+                            {
+                                var labelName = memMatch.Groups[1].Value;
+                                var routine = _parser.RoutineRegistry.Get(labelName);
+                                if (routine != null && (routine.Arguments.Count > 0 || routine.Description != null))
+                                {
+                                    info.TargetRoutine = routine;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 return info;
             }
@@ -187,5 +247,8 @@ namespace GBZ80AsmMetrics.Core
 
         // Parsed line
         public ParsedLine ParsedLine { get; set; }
+
+        // Routine info (for call instructions)
+        public RoutineDefinition TargetRoutine { get; set; }
     }
 }

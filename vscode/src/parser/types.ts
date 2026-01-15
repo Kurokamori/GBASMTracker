@@ -51,3 +51,16 @@ export interface ExpandedInfo {
   flags: FlagEffect;
   cycleInfo: string;
 }
+
+export interface RoutineArgument {
+  register: string;     // e.g., "a", "bc", "hl", "de"
+  description: string;  // e.g., "Pokemon ID", "source address"
+}
+
+export interface RoutineDefinition {
+  name: string;
+  filePath: string;
+  lineNumber: number;
+  arguments: RoutineArgument[];
+  description?: string;  // Optional general description of the routine
+}

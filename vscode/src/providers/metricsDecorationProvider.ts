@@ -14,10 +14,8 @@ export class MetricsDecorationProvider {
 
   constructor(private startPointManager: StartPointManager) {
     // Inline metrics decoration (right side)
+    // Note: margin is set dynamically per-decoration for alignment
     this.metricsDecorationType = vscode.window.createTextEditorDecorationType({
-      after: {
-        margin: '0 0 0 2em',
-      },
       rangeBehavior: vscode.DecorationRangeBehavior.ClosedOpen
     });
 
@@ -250,17 +248,17 @@ export class MetricsDecorationProvider {
           ? new vscode.ThemeColor('editorCodeLens.foreground')
           : new vscode.ThemeColor('disabledForeground');
 
-        // Calculate padding to align all metrics
-        const paddingSpaces = maxLineLength - lineData.lineLength + minPadding;
-        const padding = ' '.repeat(paddingSpaces);
+        // Calculate padding to align all metrics using CSS 'ch' units (character width)
+        const paddingChars = maxLineLength - lineData.lineLength + minPadding;
 
         metricsDecorations.push({
           range: new vscode.Range(lineData.lineNumber, line.text.length, lineData.lineNumber, line.text.length),
           renderOptions: {
             after: {
-              contentText: `${padding}${metricsText}`,
+              contentText: metricsText,
               color: color,
-              fontStyle: lineData.counting ? 'normal' : 'italic'
+              fontStyle: lineData.counting ? 'normal' : 'italic',
+              margin: `0 0 0 ${paddingChars}ch`
             }
           }
         });

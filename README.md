@@ -1,5 +1,5 @@
 # GB ASM Metrics
-This is a simple project that runs in VSCode or Notepad++ to provide metrics and QOL features for Gameboy Assembly. Created to work with pret's PokeRed and PokeCrystal, but likely works with any Gameboy Assembly project.
+This is a simple project that runs in VSCode or Notepad++ to provide metrics and QOL features for Gameboy Assembly. Created to work with pret's PokeRed, PokeYellow and PokeCrystal, but likely works with any Gameboy Assembly project.
 
 ## Installation
 In the 'Latest Release' you will find the binaries for VSCode and Notepad++.
@@ -47,4 +47,4 @@ If you notice any bugs or issues, do not hesitate to open an issue or contact me
 
 If you have any feature requests, feel free to open an issue on the github or contact me directly on **discord : Kurokamori**. (Please write in the openning message why you're DMing me as I get a TON of spam)
 
-(While this project was created for PokeRed and PokeCrystal, feel free to bring to my attention any features or bugs to do with other Gameboy Assembly projects.)
+(While this project was created for PokeRed, PokeYellow and PokeCrystal, feel free to bring to my attention any features or bugs to do with other Gameboy Assembly projects.)

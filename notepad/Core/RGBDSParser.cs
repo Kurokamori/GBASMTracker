@@ -27,14 +27,23 @@ namespace GBZ80AsmMetrics.Core
             { "HOMECALL", PredefType.Predef }
         };
 
-        private readonly MacroRegistry _macroRegistry;
+        // Valid register names for argument parsing
+        private static readonly HashSet<string> ValidRegisters = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "a", "b", "c", "d", "e", "h", "l", "af", "bc", "de", "hl", "sp", "pc"
+        };
 
-        public RGBDSParser(MacroRegistry macroRegistry = null)
+        private readonly MacroRegistry _macroRegistry;
+        private readonly RoutineRegistry _routineRegistry;
+
+        public RGBDSParser(MacroRegistry macroRegistry = null, RoutineRegistry routineRegistry = null)
         {
             _macroRegistry = macroRegistry ?? new MacroRegistry();
+            _routineRegistry = routineRegistry ?? new RoutineRegistry();
         }
 
         public MacroRegistry MacroRegistry => _macroRegistry;
+        public RoutineRegistry RoutineRegistry => _routineRegistry;
 
         /// <summary>
         /// Parse a single line of assembly code
@@ -405,25 +414,110 @@ namespace GBZ80AsmMetrics.Core
         }
 
         /// <summary>
-        /// Parse entire document to extract macro definitions
+        /// Parse entire document to extract macro and routine definitions
         /// </summary>
-        public void ParseDocument(string[] lines, string baseDir = null)
+        public void ParseDocument(string[] lines, string baseDir = null, string filePath = null)
         {
             _macroRegistry.Clear();
-            ParseDocumentInternal(lines, baseDir, new HashSet<string>());
+            // Note: We don't clear routineRegistry here as it may contain routines from other files
+            ParseDocumentInternal(lines, baseDir, new HashSet<string>(), filePath);
         }
 
-        private void ParseDocumentInternal(string[] lines, string baseDir, HashSet<string> parsedFiles)
+        /// <summary>
+        /// Clear all registries (call before scanning workspace)
+        /// </summary>
+        public void ClearAll()
+        {
+            _macroRegistry.Clear();
+            _routineRegistry.Clear();
+        }
+
+        /// <summary>
+        /// Parse argument documentation from comment lines
+        /// </summary>
+        private (List<RoutineArgument> args, string description) ParseArgumentComments(List<string> commentLines)
+        {
+            var args = new List<RoutineArgument>();
+            string description = null;
+
+            foreach (var comment in commentLines)
+            {
+                var trimmed = comment.Trim();
+
+                // Check for "Input: a = value, hl = pointer" pattern
+                var inputMatch = Regex.Match(trimmed, @"(?:inputs?|args?|arguments?|params?|parameters?):\s*(.+)", RegexOptions.IgnoreCase);
+                if (inputMatch.Success)
+                {
+                    // Parse multiple arguments from one line
+                    var argsStr = inputMatch.Groups[1].Value;
+                    var argParts = argsStr.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var part in argParts)
+                    {
+                        var argMatch = Regex.Match(part.Trim(), @"([a-z]{1,2})(?:\s*[:=\-]\s*)(.+)", RegexOptions.IgnoreCase);
+                        if (argMatch.Success)
+                        {
+                            var reg = argMatch.Groups[1].Value.ToLowerInvariant();
+                            if (ValidRegisters.Contains(reg))
+                            {
+                                args.Add(new RoutineArgument { Register = reg, Description = argMatch.Groups[2].Value.Trim() });
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Check for "Register a: description" or just "a: description" pattern
+                var regMatch = Regex.Match(trimmed, @"^(?:register\s+)?([a-z]{1,2})(?:\s*[:=\-]\s*)(.+)", RegexOptions.IgnoreCase);
+                if (regMatch.Success)
+                {
+                    var reg = regMatch.Groups[1].Value.ToLowerInvariant();
+                    if (ValidRegisters.Contains(reg))
+                    {
+                        args.Add(new RoutineArgument { Register = reg, Description = regMatch.Groups[2].Value.Trim() });
+                        continue;
+                    }
+                }
+
+                // Check for "@param" or "param" style documentation
+                var paramMatch = Regex.Match(trimmed, @"@?param\s+([a-z]{1,2})(?:\s*[:=\-]?\s*)(.+)", RegexOptions.IgnoreCase);
+                if (paramMatch.Success)
+                {
+                    var reg = paramMatch.Groups[1].Value.ToLowerInvariant();
+                    if (ValidRegisters.Contains(reg))
+                    {
+                        args.Add(new RoutineArgument { Register = reg, Description = paramMatch.Groups[2].Value.Trim() });
+                        continue;
+                    }
+                }
+
+                // If no argument pattern matched, and this is a non-trivial comment, use as description
+                if (description == null && trimmed.Length > 0 && !Regex.IsMatch(trimmed, @"^[-=]+$"))
+                {
+                    description = trimmed;
+                }
+            }
+
+            return (args, description);
+        }
+
+        private void ParseDocumentInternal(string[] lines, string baseDir, HashSet<string> parsedFiles, string filePath = null)
         {
             bool inMacro = false;
             string currentMacroName = "";
             int macroStartLine = 0;
             var macroLines = new List<string>();
 
+            // Track comment lines for routine argument documentation
+            var pendingComments = new List<string>();
+
             for (int i = 0; i < lines.Length; i++)
             {
                 string line = lines[i];
                 string workingLine = RemoveComments(line).Trim();
+
+                // Extract comment from line
+                var commentMatch = Regex.Match(line, @";(.*)$");
+                string comment = commentMatch.Success ? commentMatch.Groups[1].Value.Trim() : null;
 
                 // Check for INCLUDE directive
                 var includeMatch = Regex.Match(workingLine, @"^INCLUDE\s+[""']?([^""'\s]+)[""']?", RegexOptions.IgnoreCase);
@@ -431,6 +525,7 @@ namespace GBZ80AsmMetrics.Core
                 {
                     string includePath = includeMatch.Groups[1].Value;
                     ParseIncludedFile(includePath, baseDir, parsedFiles);
+                    pendingComments.Clear();
                     continue;
                 }
 
@@ -447,6 +542,7 @@ namespace GBZ80AsmMetrics.Core
                     currentMacroName = macroMatch.Groups[1].Value.ToUpperInvariant();
                     macroStartLine = i;
                     macroLines.Clear();
+                    pendingComments.Clear();
                     continue;
                 }
 
@@ -462,9 +558,54 @@ namespace GBZ80AsmMetrics.Core
                     continue;
                 }
 
+                // Collect lines inside macro
                 if (inMacro)
                 {
                     macroLines.Add(line);
+                    continue;
+                }
+
+                // Check for label definition (routine/variable)
+                // Matches: "LabelName:" or "LabelName::" with optional content after
+                var labelMatch = Regex.Match(workingLine, @"^(\w+)::?(?:\s|$)");
+                if (labelMatch.Success)
+                {
+                    var labelName = labelMatch.Groups[1].Value;
+
+                    // Don't create routine for local labels starting with "."
+                    if (!labelName.StartsWith("."))
+                    {
+                        // Parse any pending comments for argument documentation
+                        var (args, description) = ParseArgumentComments(pendingComments);
+
+                        // Only register if there are arguments or description documented
+                        if (args.Count > 0 || description != null)
+                        {
+                            var routine = new RoutineDefinition
+                            {
+                                Name = labelName,
+                                FilePath = filePath ?? "",
+                                LineNumber = i,
+                                Arguments = args,
+                                Description = description
+                            };
+                            _routineRegistry.Register(routine);
+                        }
+                    }
+
+                    pendingComments.Clear();
+                    continue;
+                }
+
+                // If this is a comment-only line, add to pending comments
+                if (string.IsNullOrEmpty(workingLine) && comment != null)
+                {
+                    pendingComments.Add(comment);
+                }
+                else if (!string.IsNullOrEmpty(workingLine))
+                {
+                    // Non-comment, non-label line - reset pending comments
+                    pendingComments.Clear();
                 }
             }
         }
@@ -508,7 +649,7 @@ namespace GBZ80AsmMetrics.Core
                 string[] lines = content.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
                 string newBaseDir = Path.GetDirectoryName(fullPath);
 
-                ParseDocumentInternal(lines, newBaseDir, parsedFiles);
+                ParseDocumentInternal(lines, newBaseDir, parsedFiles, fullPath);
             }
             catch
             {
@@ -632,5 +773,52 @@ namespace GBZ80AsmMetrics.Core
     {
         Predef,
         PredefJump
+    }
+
+    /// <summary>
+    /// Represents an argument/parameter for a routine
+    /// </summary>
+    public class RoutineArgument
+    {
+        public string Register { get; set; }      // e.g., "a", "bc", "hl"
+        public string Description { get; set; }   // e.g., "Pokemon ID"
+    }
+
+    /// <summary>
+    /// Represents a routine/label definition with documented arguments
+    /// </summary>
+    public class RoutineDefinition
+    {
+        public string Name { get; set; }
+        public string FilePath { get; set; }
+        public int LineNumber { get; set; }
+        public List<RoutineArgument> Arguments { get; set; } = new List<RoutineArgument>();
+        public string Description { get; set; }
+    }
+
+    /// <summary>
+    /// Registry for routine definitions with documented arguments
+    /// </summary>
+    public class RoutineRegistry
+    {
+        private readonly Dictionary<string, RoutineDefinition> _routines =
+            new Dictionary<string, RoutineDefinition>(StringComparer.OrdinalIgnoreCase);
+
+        public void Clear() => _routines.Clear();
+
+        public void Register(RoutineDefinition routine)
+        {
+            _routines[routine.Name] = routine;
+        }
+
+        public RoutineDefinition Get(string name)
+        {
+            _routines.TryGetValue(name, out var routine);
+            return routine;
+        }
+
+        public bool Has(string name) => _routines.ContainsKey(name);
+
+        public IEnumerable<RoutineDefinition> GetAll() => _routines.Values;
     }
 }

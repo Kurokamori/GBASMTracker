@@ -1,4 +1,28 @@
-import { ParsedLine, MacroDefinition } from './types';
+import { ParsedLine, MacroDefinition, RoutineDefinition, RoutineArgument } from './types';
+
+export class RoutineRegistry {
+  private routines: Map<string, RoutineDefinition> = new Map();
+
+  clear(): void {
+    this.routines.clear();
+  }
+
+  register(routine: RoutineDefinition): void {
+    this.routines.set(routine.name.toUpperCase(), routine);
+  }
+
+  get(name: string): RoutineDefinition | undefined {
+    return this.routines.get(name.toUpperCase());
+  }
+
+  has(name: string): boolean {
+    return this.routines.has(name.toUpperCase());
+  }
+
+  getAll(): RoutineDefinition[] {
+    return Array.from(this.routines.values());
+  }
+}
 
 export class MacroRegistry {
   private macros: Map<string, MacroDefinition> = new Map();
@@ -35,14 +59,31 @@ export class RGBDSParser {
     'HOMECALL': 'predef',       // Another variant
   };
 
-  private macroRegistry: MacroRegistry;
+  // Patterns for detecting argument documentation in comments
+  private static readonly ARGUMENT_PATTERNS = [
+    // "Input: a = value, hl = pointer" or "Inputs: a - value"
+    /(?:inputs?|args?|arguments?|params?|parameters?):\s*(.+)/i,
+    // "Register a: description" or "a: description"
+    /(?:register\s+)?([a-z]{1,2})(?:\s*[:=\-]\s*)(.+)/i,
+  ];
 
-  constructor(macroRegistry?: MacroRegistry) {
+  // Valid register names
+  private static readonly VALID_REGISTERS = ['a', 'b', 'c', 'd', 'e', 'h', 'l', 'af', 'bc', 'de', 'hl', 'sp', 'pc'];
+
+  private macroRegistry: MacroRegistry;
+  private routineRegistry: RoutineRegistry;
+
+  constructor(macroRegistry?: MacroRegistry, routineRegistry?: RoutineRegistry) {
     this.macroRegistry = macroRegistry || new MacroRegistry();
+    this.routineRegistry = routineRegistry || new RoutineRegistry();
   }
 
   getMacroRegistry(): MacroRegistry {
     return this.macroRegistry;
+  }
+
+  getRoutineRegistry(): RoutineRegistry {
+    return this.routineRegistry;
   }
 
   parseLine(line: string, lineNumber: number): ParsedLine {
@@ -353,29 +394,100 @@ export class RGBDSParser {
     // Decimal
     return parseInt(value, 10) || 0;
   }
-  // Parse entire document to extract macro definitions
+  // Parse entire document to extract macro definitions and routine definitions
   // baseDir is used to resolve INCLUDE paths
-  parseDocument(lines: string[], baseDir?: string): void {
+  // filePath is used to store routine file locations
+  parseDocument(lines: string[], baseDir?: string, filePath?: string): void {
     this.macroRegistry.clear();
-    this.parseDocumentInternal(lines, baseDir, new Set());
+    // Note: We don't clear routineRegistry here as it may contain routines from other files
+    this.parseDocumentInternal(lines, baseDir, new Set(), filePath);
+  }
+
+  // Clear all registries (call before scanning workspace)
+  clearAll(): void {
+    this.macroRegistry.clear();
+    this.routineRegistry.clear();
+  }
+
+  // Parse argument documentation from comment lines
+  private parseArgumentComments(commentLines: string[]): { args: RoutineArgument[], description?: string } {
+    const args: RoutineArgument[] = [];
+    let description: string | undefined;
+
+    for (const comment of commentLines) {
+      const trimmed = comment.trim();
+
+      // Check for "Input: a = value, hl = pointer" pattern
+      const inputMatch = trimmed.match(/(?:inputs?|args?|arguments?|params?|parameters?):\s*(.+)/i);
+      if (inputMatch) {
+        // Parse multiple arguments from one line
+        const argsStr = inputMatch[1];
+        const argParts = argsStr.split(/[,;]/);
+        for (const part of argParts) {
+          const argMatch = part.trim().match(/([a-z]{1,2})(?:\s*[:=\-]\s*)(.+)/i);
+          if (argMatch) {
+            const reg = argMatch[1].toLowerCase();
+            if (RGBDSParser.VALID_REGISTERS.includes(reg)) {
+              args.push({ register: reg, description: argMatch[2].trim() });
+            }
+          }
+        }
+        continue;
+      }
+
+      // Check for "Register a: description" or just "a: description" pattern
+      const regMatch = trimmed.match(/^(?:register\s+)?([a-z]{1,2})(?:\s*[:=\-]\s*)(.+)/i);
+      if (regMatch) {
+        const reg = regMatch[1].toLowerCase();
+        if (RGBDSParser.VALID_REGISTERS.includes(reg)) {
+          args.push({ register: reg, description: regMatch[2].trim() });
+          continue;
+        }
+      }
+
+      // Check for "@param" or "param" style documentation
+      const paramMatch = trimmed.match(/@?param\s+([a-z]{1,2})(?:\s*[:=\-]?\s*)(.+)/i);
+      if (paramMatch) {
+        const reg = paramMatch[1].toLowerCase();
+        if (RGBDSParser.VALID_REGISTERS.includes(reg)) {
+          args.push({ register: reg, description: paramMatch[2].trim() });
+          continue;
+        }
+      }
+
+      // If no argument pattern matched, and this is a non-trivial comment, use as description
+      if (!description && trimmed.length > 0 && !trimmed.match(/^[-=]+$/)) {
+        description = trimmed;
+      }
+    }
+
+    return { args, description };
   }
 
   // Internal method that tracks already-parsed files to avoid infinite recursion
-  private parseDocumentInternal(lines: string[], baseDir?: string, parsedFiles?: Set<string>): void {
+  private parseDocumentInternal(lines: string[], baseDir?: string, parsedFiles?: Set<string>, filePath?: string): void {
     let inMacro = false;
     let currentMacroName = '';
     let macroStartLine = 0;
     let macroLines: string[] = [];
 
+    // Track comment lines for routine argument documentation
+    let pendingComments: string[] = [];
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const workingLine = this.removeComments(line).trim();
+
+      // Extract comment from line
+      const commentMatch = line.match(/;(.*)$/);
+      const comment = commentMatch ? commentMatch[1].trim() : null;
 
       // Check for INCLUDE directive to parse external macros
       const includeMatch = workingLine.match(/^INCLUDE\s+["']?([^"'\s]+)["']?/i);
       if (includeMatch && baseDir) {
         const includePath = includeMatch[1];
         this.parseIncludedFile(includePath, baseDir, parsedFiles || new Set());
+        pendingComments = [];
         continue;
       }
 
@@ -389,6 +501,7 @@ export class RGBDSParser {
         currentMacroName = macroMatch[1].toUpperCase();
         macroStartLine = i;
         macroLines = [];
+        pendingComments = [];
         continue;
       }
 
@@ -412,6 +525,43 @@ export class RGBDSParser {
       // Collect lines inside macro
       if (inMacro) {
         macroLines.push(line);
+        continue;
+      }
+
+      // Check for label definition (routine/variable)
+      // Matches: "LabelName:" or "LabelName::" with optional content after
+      const labelMatch = workingLine.match(/^(\w+)::?(?:\s|$)/);
+      if (labelMatch) {
+        const labelName = labelMatch[1];
+
+        // Don't create routine for local labels starting with "."
+        if (!labelName.startsWith('.')) {
+          // Parse any pending comments for argument documentation
+          const { args, description } = this.parseArgumentComments(pendingComments);
+
+          // Only register if there are arguments or description documented
+          if (args.length > 0 || description) {
+            const routine: RoutineDefinition = {
+              name: labelName,
+              filePath: filePath || '',
+              lineNumber: i,
+              arguments: args,
+              description
+            };
+            this.routineRegistry.register(routine);
+          }
+        }
+
+        pendingComments = [];
+        continue;
+      }
+
+      // If this is a comment-only line, add to pending comments
+      if (!workingLine && comment) {
+        pendingComments.push(comment);
+      } else if (workingLine) {
+        // Non-comment, non-label line - reset pending comments
+        pendingComments = [];
       }
     }
   }
@@ -446,7 +596,7 @@ export class RGBDSParser {
               parsedFiles.add(altPath);
               const content = fs.readFileSync(altPath, 'utf8');
               const lines = content.split(/\r?\n/);
-              this.parseDocumentInternal(lines, path.dirname(altPath), parsedFiles);
+              this.parseDocumentInternal(lines, path.dirname(altPath), parsedFiles, altPath);
             }
             return;
           }
@@ -457,7 +607,7 @@ export class RGBDSParser {
       // Read and parse the included file
       const content = fs.readFileSync(fullPath, 'utf8');
       const lines = content.split(/\r?\n/);
-      this.parseDocumentInternal(lines, path.dirname(fullPath), parsedFiles);
+      this.parseDocumentInternal(lines, path.dirname(fullPath), parsedFiles, fullPath);
     } catch (e) {
       // Silently ignore errors (file not found, permission denied, etc.)
       console.log(`Could not parse included file: ${includePath}`, e);
@@ -514,4 +664,5 @@ export class RGBDSParser {
 }
 
 export const macroRegistry = new MacroRegistry();
-export const parser = new RGBDSParser(macroRegistry);
+export const routineRegistry = new RoutineRegistry();
+export const parser = new RGBDSParser(macroRegistry, routineRegistry);

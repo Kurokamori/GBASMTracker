@@ -19,6 +19,7 @@ namespace GBZ80AsmMetrics.Forms
         private Label _lblOpcode;
         private Label _lblFlags;
         private Label _lblType;
+        private Label _lblArguments;
         private TableLayoutPanel _table;
 
         public MetricsPanel()
@@ -39,7 +40,7 @@ namespace GBZ80AsmMetrics.Forms
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 12,
+                RowCount = 15,
                 AutoScroll = true,
                 Padding = new Padding(8),
                 CellBorderStyle = TableLayoutPanelCellBorderStyle.None
@@ -50,7 +51,7 @@ namespace GBZ80AsmMetrics.Forms
             _table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
             // Set row heights to auto
-            for (int i = 0; i < 12; i++)
+            for (int i = 0; i < 15; i++)
             {
                 _table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             }
@@ -122,6 +123,27 @@ namespace GBZ80AsmMetrics.Forms
             _lblFlags = CreateValueLabel("-");
             _lblFlags.Font = new Font("Consolas", 9F);
             _table.Controls.Add(_lblFlags, 1, row);
+            row++;
+
+            // Separator
+            _table.Controls.Add(CreateSeparator(), 0, row);
+            _table.SetColumnSpan(_table.GetControlFromPosition(0, row), 2);
+            row++;
+
+            // Arguments (for call/jump instructions to documented routines)
+            // Use full row for arguments since they can be multi-line
+            var argsTitle = CreateTitleLabel("Arguments:");
+            _table.Controls.Add(argsTitle, 0, row);
+            _table.SetColumnSpan(argsTitle, 2);
+            row++;
+
+            _lblArguments = CreateValueLabel("-");
+            _lblArguments.Font = new Font("Consolas", 9F);
+            _lblArguments.AutoSize = true;
+            _lblArguments.MaximumSize = new Size(0, 0); // No max size limit
+            _lblArguments.Dock = DockStyle.Fill;
+            _table.Controls.Add(_lblArguments, 0, row);
+            _table.SetColumnSpan(_lblArguments, 2);
 
             this.Controls.Add(_table);
         }
@@ -246,6 +268,29 @@ namespace GBZ80AsmMetrics.Forms
             {
                 _lblFlags.Text = "-";
             }
+
+            // Arguments (for call/jump instructions to documented routines)
+            if (info.TargetRoutine != null)
+            {
+                var routine = info.TargetRoutine;
+                var parts = new System.Collections.Generic.List<string>();
+
+                if (routine.Description != null)
+                {
+                    parts.Add(routine.Description);
+                }
+
+                foreach (var arg in routine.Arguments)
+                {
+                    parts.Add($"{arg.Register.ToUpperInvariant()}: {arg.Description}");
+                }
+
+                _lblArguments.Text = string.Join("\n", parts);
+            }
+            else
+            {
+                _lblArguments.Text = "-";
+            }
         }
 
         private void ClearDisplay()
@@ -258,6 +303,7 @@ namespace GBZ80AsmMetrics.Forms
             _lblType.Text = "-";
             _lblOpcode.Text = "-";
             _lblFlags.Text = "-";
+            _lblArguments.Text = "-";
         }
 
         private string GetCyclesText(LineInfo info)
