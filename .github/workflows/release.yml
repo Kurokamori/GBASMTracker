@@ -61,18 +61,18 @@ jobs:
         uses: nuget/setup-nuget@v2
 
       - name: Restore NuGet packages
-        working-directory: notepadpp/GBZ80AsmMetrics
+        working-directory: notepad/
         run: nuget restore GBZ80AsmMetrics.csproj -PackagesDirectory packages
 
       - name: Build ${{ matrix.platform }}
-        working-directory: notepadpp/GBZ80AsmMetrics
+        working-directory: notepad/
         run: msbuild GBZ80AsmMetrics.csproj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /t:Rebuild
 
       - name: Upload ${{ matrix.platform }} artifact
         uses: actions/upload-artifact@v4
         with:
           name: notepadpp-${{ matrix.platform }}
-          path: notepadpp/GBZ80AsmMetrics/bin/${{ matrix.platform }}/Release/GBZ80AsmMetrics.dll
+          path: notepad/bin/${{ matrix.platform }}/Release/GBZ80AsmMetrics.dll
 
   upload-release-assets:
     name: Upload Release Assets
