@@ -211,6 +211,7 @@ namespace GBZ80AsmMetrics
 
             if (_isMetricsEnabled)
             {
+                _lastDocContent = ""; // Force refresh with new start point
                 QueueMetricsUpdate();
             }
         }
@@ -222,6 +223,7 @@ namespace GBZ80AsmMetrics
 
             if (_isMetricsEnabled && IsAssemblyFile())
             {
+                _lastDocContent = ""; // Force refresh after clearing start points
                 QueueMetricsUpdate();
             }
         }

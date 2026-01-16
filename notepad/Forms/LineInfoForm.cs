@@ -12,6 +12,7 @@ namespace GBZ80AsmMetrics.Forms
     public class LineInfoForm : Form
     {
         private readonly LineInfo _lineInfo;
+        private TableLayoutPanel _table;
 
         public LineInfoForm(LineInfo lineInfo)
         {
@@ -22,92 +23,204 @@ namespace GBZ80AsmMetrics.Forms
 
         private void InitializeComponent()
         {
-            this.Text = "Instruction Details";
-            this.Size = new Size(450, 400);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.SuspendLayout();
+            // 
+            // LineInfoForm
+            // 
+            this.AutoSize = true;
+            this.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
+            this.ClientSize = new System.Drawing.Size(350, 500);
+            this.Font = new System.Drawing.Font("Segoe UI", 9F);
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
+            this.MaximumSize = new System.Drawing.Size(500, 600);
             this.MinimizeBox = false;
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.Font = new Font("Segoe UI", 9F);
+            this.MinimumSize = new System.Drawing.Size(320, 200);
+            this.Name = "LineInfoForm";
+            this.Padding = new System.Windows.Forms.Padding(0, 0, 0, 50);
+            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+            this.Text = "Instruction Details";
+            this.Load += new System.EventHandler(this.LineInfoForm_Load);
+            this.ResumeLayout(false);
+
         }
 
         private void PopulateInfo()
         {
-            var panel = new Panel
+            _table = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                AutoScroll = true,
-                Padding = new Padding(15)
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(12),
+                CellBorderStyle = TableLayoutPanelCellBorderStyle.None
             };
 
-            int y = 15;
+            // Set column widths
+            _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            // Title
+            int row = 0;
+
+            // Title (instruction name)
             string title = GetTitle();
-            var lblTitle = new Label
-            {
-                Text = title,
-                Location = new Point(15, y),
-                Font = new Font("Consolas", 14F, FontStyle.Bold),
-                AutoSize = true
-            };
-            panel.Controls.Add(lblTitle);
-            y += 35;
+            var lblTitle = CreateValueLabel(title);
+            lblTitle.Font = new Font("Consolas", 12F, FontStyle.Bold);
+            lblTitle.Margin = new Padding(3, 6, 3, 12);
+            _table.Controls.Add(lblTitle, 0, row);
+            _table.SetColumnSpan(lblTitle, 2);
+            row++;
 
             // Separator
-            y = AddSeparator(panel, y);
+            row = AddSeparator(row);
 
-            // Basic metrics
-            y = AddLabelPair(panel, "Size:", $"{_lineInfo.Bytes} byte(s)", y);
-            y = AddLabelPair(panel, "Cycles:", GetCyclesText(), y);
+            // Type
+            string typeText = GetTypeText();
+            row = AddRow("Type:", typeText, row);
 
+            // Bytes
+            row = AddRow("Bytes:", $"{_lineInfo.Bytes}B", row);
+
+            // Cycles
+            row = AddRow("Cycles:", GetCyclesText(), row);
+
+            // Cumulative (if available)
             if (_lineInfo.CumulativeBytes > 0 || _lineInfo.CumulativeCycles > 0)
             {
-                y = AddLabelPair(panel, "Cumulative:", $"{_lineInfo.CumulativeBytes}B / {_lineInfo.CumulativeCycles}c", y);
+                row = AddRow("Σ Bytes:", $"{_lineInfo.CumulativeBytes}B", row);
+                row = AddRow("Σ Cycles:", $"{_lineInfo.CumulativeCycles}c", row);
             }
 
             // Opcode specific info
             if (_lineInfo.Opcode != null)
             {
-                y = AddSeparator(panel, y);
-                y = AddLabelPair(panel, "Opcode:", _lineInfo.OpcodeHex, y);
+                row = AddSeparator(row);
+                row = AddRow("Opcode:", _lineInfo.OpcodeHex, row);
 
-                // Flags table
-                y += 15;
-                y = AddFlagsTable(panel, y);
+                // Flags
+                if (_lineInfo.Opcode.Flags != null)
+                {
+                    var f = _lineInfo.Opcode.Flags;
+                    row = AddRow("Flags:", $"Z:{f.Z}  N:{f.N}  H:{f.H}  C:{f.C}", row);
+                }
             }
 
             // Macro specific info
             if (_lineInfo.IsMacroCall)
             {
-                y = AddSeparator(panel, y);
-                y = AddLabelPair(panel, "Macro:", _lineInfo.MacroName, y);
-                y = AddLabelPair(panel, "Cycle range:", $"{_lineInfo.MacroCyclesMax}c max / {_lineInfo.MacroCyclesMin}c min", y);
-                y = AddLabelPair(panel, "Instructions:", _lineInfo.MacroInstructionCount.ToString(), y);
+                row = AddSeparator(row);
+                row = AddRow("Macro:", _lineInfo.MacroName, row);
+                row = AddRow("Cycle Range:", $"{_lineInfo.MacroCyclesMin}c - {_lineInfo.MacroCyclesMax}c", row);
+                row = AddRow("Instructions:", _lineInfo.MacroInstructionCount.ToString(), row);
             }
 
             // Predef specific info
             if (_lineInfo.IsPredefCall)
             {
-                y = AddSeparator(panel, y);
-                y = AddLabelPair(panel, "Type:", _lineInfo.PredefTypeLabel, y);
-                y = AddLabelPair(panel, "Function:", _lineInfo.PredefName, y);
-                y = AddLabelPair(panel, "Composition:", GetPredefComposition(), y);
+                row = AddSeparator(row);
+                row = AddRow("Predef Type:", _lineInfo.PredefTypeLabel, row);
+                row = AddRow("Function:", _lineInfo.PredefName, row);
+                row = AddRow("Composition:", GetPredefComposition(), row);
             }
+
+            // Arguments (for call/jump instructions to documented routines)
+            if (_lineInfo.TargetRoutine != null)
+            {
+                row = AddSeparator(row);
+
+                var routine = _lineInfo.TargetRoutine;
+                var parts = new System.Collections.Generic.List<string>();
+
+                if (routine.Description != null)
+                {
+                    parts.Add(routine.Description);
+                }
+
+                foreach (var arg in routine.Arguments)
+                {
+                    parts.Add($"{arg.Register.ToUpperInvariant()}: {arg.Description}");
+                }
+
+                string argsText = string.Join("\n", parts);
+
+                var argsTitle = CreateTitleLabel("Arguments:");
+                _table.Controls.Add(argsTitle, 0, row);
+                _table.SetColumnSpan(argsTitle, 2);
+                row++;
+
+                var argsValue = CreateValueLabel(argsText);
+                argsValue.Font = new Font("Consolas", 9F);
+                argsValue.Margin = new Padding(12, 3, 3, 6);
+                _table.Controls.Add(argsValue, 0, row);
+                _table.SetColumnSpan(argsValue, 2);
+                row++;
+            }
+
+            this.Controls.Add(_table);
 
             // OK button
             var btnOK = new Button
             {
                 Text = "OK",
                 DialogResult = DialogResult.OK,
-                Location = new Point(this.ClientSize.Width - 95, this.ClientSize.Height - 45),
                 Size = new Size(80, 30),
                 Anchor = AnchorStyles.Bottom | AnchorStyles.Right
             };
-
-            this.Controls.Add(panel);
+            btnOK.Location = new Point(this.ClientSize.Width - 95, this.ClientSize.Height - 45);
             this.Controls.Add(btnOK);
             this.AcceptButton = btnOK;
+
+            // Reposition button after auto-size
+            this.Layout += (s, e) =>
+            {
+                btnOK.Location = new Point(this.ClientSize.Width - 95, this.ClientSize.Height - 45);
+            };
+        }
+
+        private int AddRow(string label, string value, int row)
+        {
+            _table.Controls.Add(CreateTitleLabel(label), 0, row);
+            var valueLabel = CreateValueLabel(value);
+            valueLabel.Font = new Font("Consolas", 9F);
+            _table.Controls.Add(valueLabel, 1, row);
+            return row + 1;
+        }
+
+        private int AddSeparator(int row)
+        {
+            var sep = new Panel
+            {
+                Height = 2,
+                Dock = DockStyle.Top,
+                BackColor = SystemColors.ControlDark,
+                Margin = new Padding(0, 8, 0, 8)
+            };
+            _table.Controls.Add(sep, 0, row);
+            _table.SetColumnSpan(sep, 2);
+            return row + 1;
+        }
+
+        private Label CreateTitleLabel(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(3, 6, 10, 6),
+                TextAlign = ContentAlignment.MiddleRight
+            };
+        }
+
+        private Label CreateValueLabel(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                AutoSize = true,
+                Margin = new Padding(3, 6, 3, 6)
+            };
         }
 
         private string GetTitle()
@@ -128,22 +241,39 @@ namespace GBZ80AsmMetrics.Forms
             }
             if (_lineInfo.IsDataDirective)
             {
-                return $"Data Directive";
+                return "Data Directive";
             }
             return "Unknown";
+        }
+
+        private string GetTypeText()
+        {
+            if (_lineInfo.IsMacroCall)
+            {
+                return "Macro";
+            }
+            if (_lineInfo.IsPredefCall)
+            {
+                return _lineInfo.PredefTypeLabel;
+            }
+            if (_lineInfo.IsDataDirective)
+            {
+                return "Data Directive";
+            }
+            return "Instruction";
         }
 
         private string GetCyclesText()
         {
             if (_lineInfo.Opcode != null && _lineInfo.Opcode.Cycles.Length > 1)
             {
-                return $"{_lineInfo.Opcode.Cycles[0]} (taken) / {_lineInfo.Opcode.Cycles[1]} (not taken)";
+                return $"{_lineInfo.Opcode.Cycles[0]}c (taken) / {_lineInfo.Opcode.Cycles[1]}c (not taken)";
             }
             if (_lineInfo.IsMacroCall && _lineInfo.MacroCyclesMin != _lineInfo.MacroCyclesMax)
             {
-                return $"{_lineInfo.MacroCyclesMax} max / {_lineInfo.MacroCyclesMin} min";
+                return $"{_lineInfo.MacroCyclesMin}c - {_lineInfo.MacroCyclesMax}c";
             }
-            return $"{_lineInfo.Cycles}";
+            return $"{_lineInfo.Cycles}c";
         }
 
         private string GetPredefComposition()
@@ -155,107 +285,9 @@ namespace GBZ80AsmMetrics.Forms
             return "ld a,BANK + ld hl,addr + call";
         }
 
-        private int AddLabelPair(Panel panel, string label, string value, int y)
+        private void LineInfoForm_Load(object sender, EventArgs e)
         {
-            var lblKey = new Label
-            {
-                Text = label,
-                Location = new Point(15, y),
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
-                AutoSize = true
-            };
 
-            var lblValue = new Label
-            {
-                Text = value,
-                Location = new Point(120, y),
-                Font = new Font("Consolas", 9F),
-                AutoSize = true
-            };
-
-            panel.Controls.Add(lblKey);
-            panel.Controls.Add(lblValue);
-
-            return y + 25;
-        }
-
-        private int AddSeparator(Panel panel, int y)
-        {
-            var sep = new Label
-            {
-                BorderStyle = BorderStyle.Fixed3D,
-                Location = new Point(15, y + 5),
-                Size = new Size(panel.ClientSize.Width - 50, 2)
-            };
-            panel.Controls.Add(sep);
-            return y + 20;
-        }
-
-        private int AddFlagsTable(Panel panel, int y)
-        {
-            if (_lineInfo.Opcode?.Flags == null) return y;
-
-            var flags = _lineInfo.Opcode.Flags;
-
-            // Header
-            var header = new Label
-            {
-                Text = "Flags Affected:",
-                Location = new Point(15, y),
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
-                AutoSize = true
-            };
-            panel.Controls.Add(header);
-            y += 25;
-
-            // Table header
-            string[] headers = { "Z", "N", "H", "C" };
-            string[] values = { flags.Z, flags.N, flags.H, flags.C };
-            int cellWidth = 50;
-            int startX = 60;
-
-            for (int i = 0; i < 4; i++)
-            {
-                var lblHeader = new Label
-                {
-                    Text = headers[i],
-                    Location = new Point(startX + i * cellWidth, y),
-                    Size = new Size(cellWidth, 20),
-                    TextAlign = ContentAlignment.MiddleCenter,
-                    Font = new Font("Segoe UI", 9F, FontStyle.Bold),
-                    BorderStyle = BorderStyle.FixedSingle,
-                    BackColor = SystemColors.ControlLight
-                };
-                panel.Controls.Add(lblHeader);
-            }
-            y += 20;
-
-            for (int i = 0; i < 4; i++)
-            {
-                var lblValue = new Label
-                {
-                    Text = values[i],
-                    Location = new Point(startX + i * cellWidth, y),
-                    Size = new Size(cellWidth, 25),
-                    TextAlign = ContentAlignment.MiddleCenter,
-                    Font = new Font("Consolas", 10F),
-                    BorderStyle = BorderStyle.FixedSingle
-                };
-                panel.Controls.Add(lblValue);
-            }
-            y += 35;
-
-            // Legend
-            var legend = new Label
-            {
-                Text = "- = unchanged, 0 = reset, 1 = set, letter = affected",
-                Location = new Point(15, y),
-                ForeColor = SystemColors.GrayText,
-                AutoSize = true
-            };
-            panel.Controls.Add(legend);
-
-            return y + 25;
         }
     }
 }
